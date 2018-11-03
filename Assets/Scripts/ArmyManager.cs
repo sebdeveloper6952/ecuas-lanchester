@@ -2,15 +2,30 @@
 using System.Collections.Generic;
 using UnityEngine;
 using System;
+using UnityEngine.UI;
 
-public class ArmyManager : MonoBehaviour {
-
+public class ArmyManager : MonoBehaviour
+{
+    public float battleSpeed = 1.0f;
+    public Text blueArmyText;
+    public Text redArmyText;
     public GameObject redSoldierPrefab;
     public GameObject blueSoldierPrefab;
 
+    /// <summary>
+    /// Used by lanchester equation.
+    /// </summary>
+    private bool battleStarted = false;
+    private bool battleFinished = false;
+    private bool doneSimulation = false;
+    private bool redArmyWon = false;
+    private float battleTime = 0f;
+    private double d;
     private int redArmyUnits;
+    private int curRedArmyUnits;
     private float redArmyEff;
     private int blueArmyUnits;
+    private int curBlueArmyUnits;
     private float blueArmyEff;
     private List<Soldier> redArmy;
     private List<Soldier> blueArmy;
@@ -27,9 +42,31 @@ public class ArmyManager : MonoBehaviour {
         redArmyEff = PlayerPrefs.GetFloat(BattleConfig.redArmyEffKey);
         blueArmyUnits = PlayerPrefs.GetInt(BattleConfig.blueArmyUnitsKey);
         blueArmyEff = PlayerPrefs.GetFloat(BattleConfig.blueArmyEffKey);
+        redArmyText.text = String.Concat("Ejército Rojo: ", redArmyUnits);
+        blueArmyText.text = String.Concat("Ejército Azul: ", blueArmyUnits);
+        d = Math.Sqrt(redArmyEff * blueArmyEff);
+        curRedArmyUnits = redArmyUnits;
+        curBlueArmyUnits = blueArmyUnits;
         InstantiateArmies();
         AssignTargets();
         StartBattle();
+    }
+
+    private void Update()
+    {
+        if (doneSimulation) return;
+        else if (battleStarted)
+        {
+            battleTime += Time.deltaTime;
+            RedArmyDiffEq(battleTime * Time.deltaTime * battleSpeed);
+            BlueArmyDiffEq(battleTime * Time.deltaTime * battleSpeed);
+        }
+        else if (battleFinished)
+        {
+            if (redArmyWon) foreach (Soldier s in redArmy) s.SetVictorious();
+            else foreach (Soldier s in blueArmy) s.SetVictorious();
+            doneSimulation = true;
+        }
     }
 
     private void OnTriggerEnter(Collider other)
@@ -37,8 +74,8 @@ public class ArmyManager : MonoBehaviour {
         Soldier s = other.GetComponent<Soldier>();
         if (s != null)
         {
-            Debug.Log(s.soldierId + " OnTriggerEnter");
             s.SetAttack(true, true);
+            battleStarted = true;
         }
     }
 
@@ -61,12 +98,13 @@ public class ArmyManager : MonoBehaviour {
 
     private void InstantiateArmies()
     {
-        int wide = 10;
+        int redWidth = redArmyUnits / 10;
+        int blueWidth = blueArmyUnits / 10;
         Vector3 pos0 = new Vector3(transform.position.x, transform.position.y, transform.position.z - 20f);
         Vector3 pos1 = new Vector3(transform.position.x, transform.position.y, transform.position.z + 20f);
         for (int r = 0; r < redArmyUnits; r++)
         {
-            if (r % wide == 0)
+            if (r % redWidth == 0)
             {
                 pos0 -= Vector3.forward * 3f;
                 pos0 = new Vector3(transform.position.x, transform.position.y, pos0.z);
@@ -76,7 +114,7 @@ public class ArmyManager : MonoBehaviour {
         }
         for (int r = 0; r < blueArmyUnits; r++)
         {
-            if (r % wide == 0)
+            if (r % blueWidth == 0)
             {
                 pos1 += Vector3.forward * 3f;
                 pos1 = new Vector3(transform.position.x, transform.position.y, pos1.z);
@@ -119,9 +157,65 @@ public class ArmyManager : MonoBehaviour {
         }
     }
 
-    private void TestDiffEq()
+    private void RandomSoldierDeath(bool isRedArmy)
     {
-        
+        Soldier s;
+        if (isRedArmy)
+        {
+            s = redArmy[UnityEngine.Random.Range(0, redArmy.Count)];
+            s.Kill();
+            s.myTarget.SetTarget(redArmy[UnityEngine.Random.Range(0, redArmy.Count)]);
+        }
+        else
+        {
+            s = blueArmy[UnityEngine.Random.Range(0, blueArmy.Count)];
+            s.Kill();
+            s.myTarget.SetTarget(blueArmy[UnityEngine.Random.Range(0, blueArmy.Count)]);
+        }
+    }
+    
+    /// <summary>
+    /// RedArmy Differential Equation
+    /// </summary>
+    /// <param name="inputTime"></param>
+    private void RedArmyDiffEq(float inputTime)
+    {
+        double number = redArmyUnits * Math.Cosh(d * inputTime) + ((-blueArmyEff * blueArmyUnits) / d) * Math.Sinh(d * inputTime);
+        number = Math.Ceiling(number);
+        if (number < curRedArmyUnits)
+        {
+            curRedArmyUnits = Convert.ToInt32(number);
+            if (curRedArmyUnits < 0)
+            {
+                battleFinished = true;
+                redArmyWon = false;
+                return;
+            }
+            RandomSoldierDeath(true);
+            redArmyText.text = String.Concat("Ejército Rojo: ", curRedArmyUnits);
+        }
+    }
+
+    /// <summary>
+    /// RedArmy Differential Equation
+    /// </summary>
+    /// <param name="inputTime"></param>
+    private void BlueArmyDiffEq(float inputTime)
+    {
+        double number = blueArmyUnits * Math.Cosh(d * inputTime) + ((-redArmyEff * redArmyUnits) / d) * Math.Sinh(d * inputTime);
+        number = Math.Ceiling(number);
+        if (number < curBlueArmyUnits)
+        {
+            curBlueArmyUnits = Convert.ToInt32(number);
+            if (curBlueArmyUnits < 0)
+            {
+                battleFinished = true;
+                redArmyWon = true;
+                return;
+            }
+            RandomSoldierDeath(false);
+            blueArmyText.text = String.Concat("Ejército Azul: ", curBlueArmyUnits);
+        }
     }
 
 }
